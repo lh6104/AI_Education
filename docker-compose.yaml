@@ -1,0 +1,95 @@
+version: '3.8'
+
+services:
+  # --- Service 1: AI Quiz (Python) ---
+  # quiz_service:
+  #   build:
+  #     context: ./AI-quizz-service
+  #     dockerfile: Dockerfile.quizz
+  #   container_name: quiz_service
+  #   ports:
+  #     - "5000:5000"
+  #   environment:
+  #     - GROQ_API_KEY=${GROQ_API_KEY}
+  #     - PORT=5000
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:5000/"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #   networks:
+  #     - app-network
+
+  # --- Service 2: Backend API (FastAPI) ---
+  backend:
+    build:
+      context: ./be
+      dockerfile: Dockerfile.backend
+    container_name: backend_api
+    ports:
+      - "8000:8000"
+    environment:
+      # Database configuration
+      - DATABASE_URL=sqlite:///./dev.db
+      
+      # Model configurations
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - GROQ_MODEL=${GROQ_MODEL}
+      - TEMPERATURE=${TEMPERATURE}
+      - MAX_TOKENS=${MAX_TOKENS}
+      - CHAT_HISTORY_LIMIT=${CHAT_HISTORY_LIMIT}
+
+      # Google Custom Search API configuration
+      - GOOGLE_SEARCH_API_KEY=${GOOGLE_SEARCH_API_KEY}
+      - GOOGLE_SEARCH_ENGINE_ID=${GOOGLE_SEARCH_ENGINE_ID}
+      
+      # CORS
+      - FRONTEND_URL=http://localhost:5173
+    volumes:
+      - ./be/dev.db:/app/dev.db
+      - ./be:/app
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - app-network
+
+  # --- Service 3: Frontend (React Vite - Dev Mode) ---
+  frontend:
+    image: node:20-alpine
+    container_name: frontend_ui
+    working_dir: /app
+    ports:
+      - "5173:5173"
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+      - NODE_ENV=development
+      - VITE_API_URL=http://localhost:8000
+    volumes:
+      - ./fe:/app:delegated
+      - /app/node_modules
+    command: sh -c "npm install --no-audit --no-fund && npm run dev -- --host 0.0.0.0"
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflare_tunnel
+    restart: always
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
+    command: tunnel run
+    networks:
+      - app-network
+    depends_on:
+      - backend
+      - frontend
+
+networks:
+  app-network:
+    driver: bridge
